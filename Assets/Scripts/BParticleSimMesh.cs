@@ -1,187 +1,284 @@
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq.Expressions;
 using UnityEngine;
 
-// Check this out we can require components be on a game object!
 [RequireComponent(typeof(MeshFilter))]
-
 public class BParticleSimMesh : MonoBehaviour
 {
     public struct BSpring
     {
-        public float kd;                        // damping coefficient
-        public float ks;                        // spring coefficient
-        public float restLength;                // rest length of this spring
-        public int attachedParticle;            // index of the attached other particle (use me wisely to avoid doubling springs and sprign calculations)
+        public float kd;
+        public float ks;
+        public float restLength;
+        public int attachedParticle;
     }
 
     public struct BContactSpring
     {
-        public float kd;                        // damping coefficient
-        public float ks;                        // spring coefficient
-        public float restLength;                // rest length of this spring (think about this ... may not even be needed o_0
-        public Vector3 attachPoint;             // the attached point on the contact surface
+        public float kd;
+        public float ks;
+        public float restLength;
+        public Vector3 attachPoint;
     }
 
     public struct BParticle
     {
-        public Vector3 position;                // position information
-        public Vector3 velocity;                // velocity information
-        public float mass;                      // mass information
-        public BContactSpring contactSpring;    // Special spring for contact forces
-        public bool attachedToContact;          // is thi sparticle currently attached to a contact (ground plane contact)
-        public List<BSpring> attachedSprings;   // all attached springs, as a list in case we want to modify later fast
-        public Vector3 currentForces;           // accumulate forces here on each step        
+        public Vector3 position;
+        public Vector3 velocity;
+        public float mass;
+        public BContactSpring contactSpring;
+        public bool attachedToContact;
+        public List<BSpring> attachedSprings;
+        public Vector3 currentForces;
     }
 
     public struct BPlane
     {
-        public Vector3 position;                // plane position
-        public Vector3 normal;                  // plane normal
+        public Vector3 position;
+        public Vector3 normal;
     }
 
-    public float contactSpringKS = 1000.0f;     // contact spring coefficient with default 1000
-    public float contactSpringKD = 20.0f;       // contact spring daming coefficient with default 20
+    public float contactSpringKS = 1000.0f;
+    public float contactSpringKD = 20.0f;
+    public float defaultSpringKS = 100.0f;
+    public float defaultSpringKD = 1.0f;
+    public bool debugRender = false;
 
-    public float defaultSpringKS = 100.0f;      // default spring coefficient with default 100
-    public float defaultSpringKD = 1.0f;        // default spring daming coefficient with default 1
+    // Public inspector variables
+    public bool handlePlaneCollisions = true;
+    public float particleMass = 1.0f;
+    public bool useGravity = true;
+    public Vector3 gravity = new Vector3(0, -9.8f, 0);
 
-    public bool debugRender = false;            // To render or not to render
+    private Mesh mesh;
+    private BParticle[] particles;
+    private BPlane plane;
+    private GameObject groundPlaneObject; // Reference to the actual ground plane
 
-
-    /*** 
-     * I've given you all of the above to get you started
-     * Here you need to publicly provide the:
-     * - the ground plane transform (Transform)
-     * - handlePlaneCollisions flag (bool)
-     * - particle mass (float)
-     * - useGravity flag (bool)
-     * - gravity value (Vector3)
-    ***/
-    public Transform groundPlaneTransform;  // the ground plane transform (Transform)
-    public bool handlePlaneCollisions;      // handlePlaneCollisions flag (bool)
-    public float particleMass = 1.0f;       // particle mass (float)
-    public bool useGravity = true;          // useGravity flag (bool)
-    public Vector3 gravity = new Vector3(0, -9.8f, 0); //gravity value (Vector3)
-
-    /***
-     * Here you need to privately provide the:
-     * - Mesh (Mesh)
-     * - array of particles (BParticle[])
-     * - the plane (BPlane)
-     ***/
-    
-    private Mesh mesh;                 // Mesh (Mesh)
-    private BParticle[] particles;     // array of particles (BParticle[])
-    private BPlane plane;              // the plane (BPlane)
-
-
-
-    /// <summary>
-    /// Init everything
-    /// HINT: in particular you should probbaly handle the mesh, init all the particles, and the ground plane
-    /// HINT 2: I'd for organization sake put the init particles and plane stuff in respective functions
-    /// HINT 3: Note that mesh vertices when accessed from the mesh filter are in local coordinates.
-    ///         This script will be on the object with the mesh filter, so you can use the functions
-    ///         transform.TransformPoint and transform.InverseTransformPoint accordingly 
-    ///         (you need to operate on world coordinates, and render in local)
-    /// HINT 4: the idea here is to make a mathematical particle object for each vertex in the mesh, then connect
-    ///         each particle to every other particle. Be careful not to double your springs! There is a simple
-    ///         inner loop approach you can do such that you attached exactly one spring to each particle pair
-    ///         on initialization. Then when updating you need to remember a particular trick about the spring forces
-    ///         generated between particles. 
-    /// </summary>
-
-    /*** BIG HINT: My solution code has as least the following functions
-     * InitParticles()
-     * InitPlane()
-     * UpdateMesh() (remember the hint above regarding global and local coords)
-     * ResetParticleForces()
-     * ...
-     ***/
-    
-    //InitParticles()
     void InitParticles()
     {
-         MeshFilter mf = GetComponent<MeshFilter>();
-    mesh = mf.mesh;
-
-    Vector3[] verts = mesh.vertices;
-    int vCount = verts.Length;
-
-    particles = new BParticle[vCount];
-
-    // Create particles
-    for (int i = 0; i < vCount; i++)
-    {
-        BParticle p = new BParticle();
-        p.position = transform.TransformPoint(verts[i]);   // convert to world-space
-        p.velocity = Vector3.zero;
-        p.mass = particleMass;
-        p.contactSpring = new BContactSpring();
-        p.attachedToContact = false;
-        p.attachedSprings = new List<BSpring>();
-        p.currentForces = Vector3.zero;
-
-        particles[i] = p;
-    }
-
-    // Create springs between particle pairs (i < j avoids duplicates)
-    for (int i = 0; i < vCount; i++)
-    {
-        for (int j = i + 1; j < vCount; j++)
+        MeshFilter meshFilter = GetComponent<MeshFilter>();
+        mesh = meshFilter.mesh;
+        Vector3[] vertices = mesh.vertices;
+        
+        particles = new BParticle[vertices.Length];
+        
+        // Initialize particles from mesh vertices
+        for (int i = 0; i < vertices.Length; i++)
         {
-            BSpring spring = new BSpring();
-            spring.ks = defaultSpringKS;
-            spring.kd = defaultSpringKD;
-
-            float restLen = Vector3.Distance(
-                particles[i].position,
-                particles[j].position
-            );
-            spring.restLength = restLen;
-            spring.attachedParticle = j;
-
-            particles[i].attachedSprings.Add(spring);
+            particles[i] = new BParticle
+            {
+                position = transform.TransformPoint(vertices[i]),
+                velocity = Vector3.zero,
+                mass = particleMass,
+                attachedToContact = false,
+                attachedSprings = new List<BSpring>(),
+                currentForces = Vector3.zero,
+                contactSpring = new BContactSpring()
+            };
         }
-    }
-    }
-
-    //InitPlane()
-    void InitPlane()
-    {
-        plane = new BPlane();
-
-        // Plane position and normal are taken from the provided transform
-        plane.position = groundPlaneTransform.position;
-        plane.normal   = groundPlaneTransform.up.normalized;
-    }
-
-    //UpdateMesh()
-    void UpdateMesh()
-    {
-        if (mesh == null || particles == null) return;
-
-        Vector3[] verts = mesh.vertices;
-
+        
+        // Create springs between all particle pairs (no duplicates)
         for (int i = 0; i < particles.Length; i++)
         {
-            // convert world-space particle positions back to local mesh space
-            verts[i] = transform.InverseTransformPoint(particles[i].position);
+            for (int j = i + 1; j < particles.Length; j++)
+            {
+                float restLength = Vector3.Distance(particles[i].position, particles[j].position);
+                
+                BSpring spring = new BSpring
+                {
+                    ks = defaultSpringKS,
+                    kd = defaultSpringKD,
+                    restLength = restLength,
+                    attachedParticle = j
+                };
+                
+                particles[i].attachedSprings.Add(spring);
+            }
         }
-
-        mesh.vertices = verts;
-        mesh.RecalculateNormals();
-        mesh.RecalculateBounds();
     }
 
-    //ResetParticleForces()
+    void InitPlane()
+    {
+        // Find the ground plane GameObject in the scene
+        groundPlaneObject = GameObject.Find("GroundPlane"); // Adjust name if different
+        
+        if (groundPlaneObject != null)
+        {
+            plane.position = groundPlaneObject.transform.position;
+            plane.normal = groundPlaneObject.transform.up; // Assuming the plane's up direction is the normal
+            
+            Debug.Log($"Ground plane found at position: {plane.position} with normal: {plane.normal}");
+        }
+        else
+        {
+            // Fallback: create a default ground plane at y=0
+            groundPlaneObject = new GameObject("DefaultGroundPlane");
+            plane.position = Vector3.zero;
+            plane.normal = Vector3.up;
+            Debug.LogWarning("No ground plane found in scene! Using default ground plane at y=0");
+        }
+    }
+
+    void UpdateMesh()
+    {
+        Vector3[] vertices = new Vector3[particles.Length];
+        
+        for (int i = 0; i < particles.Length; i++)
+        {
+            // Convert world position back to local coordinates for the mesh
+            vertices[i] = transform.InverseTransformPoint(particles[i].position);
+        }
+        
+        mesh.vertices = vertices;
+        mesh.RecalculateBounds();
+        mesh.RecalculateNormals();
+    }
+
     void ResetParticleForces()
     {
         for (int i = 0; i < particles.Length; i++)
         {
             particles[i].currentForces = Vector3.zero;
+        }
+    }
+
+    void ApplyGravity()
+    {
+        if (!useGravity) return;
+        
+        for (int i = 0; i < particles.Length; i++)
+        {
+            particles[i].currentForces += gravity * particles[i].mass;
+        }
+    }
+
+    void ApplySpringForces()
+    {
+        for (int i = 0; i < particles.Length; i++)
+        {
+            foreach (BSpring spring in particles[i].attachedSprings)
+            {
+                int j = spring.attachedParticle;
+                Vector3 deltaPos = particles[i].position - particles[j].position;
+                float distance = deltaPos.magnitude;
+                
+                if (distance > 0.0001f) // Avoid division by zero
+                {
+                    Vector3 direction = deltaPos / distance;
+                    Vector3 deltaVel = particles[i].velocity - particles[j].velocity;
+                    
+                    // Spring force: k_s * (l - |x_i - x_j|) * direction
+                    float springForceMagnitude = spring.ks * (spring.restLength - distance);
+                    Vector3 springForce = springForceMagnitude * direction;
+                    
+                    // Damping force: k_d * ((v_i - v_j) · direction) * direction
+                    float dampingForceMagnitude = spring.kd * Vector3.Dot(deltaVel, direction);
+                    Vector3 dampingForce = dampingForceMagnitude * direction;
+                    
+                    // Total force and apply to both particles (reflected trick)
+                    Vector3 totalForce = springForce - dampingForce;
+                    particles[i].currentForces += totalForce;
+                    particles[j].currentForces -= totalForce;
+                }
+            }
+        }
+    }
+
+    void HandleGroundCollisions()
+    {
+        if (!handlePlaneCollisions || groundPlaneObject == null) return;
+        
+        for (int i = 0; i < particles.Length; i++)
+        {
+            // Calculate signed distance to plane
+            Vector3 toParticle = particles[i].position - plane.position;
+            float distanceToPlane = Vector3.Dot(toParticle, plane.normal);
+            
+            if (distanceToPlane < 0) // Particle is below the plane (penetrating)
+            {
+                if (!particles[i].attachedToContact)
+                {
+                    // Initialize contact spring - attach point is the nearest point on the plane
+                    Vector3 nearestPoint = particles[i].position - distanceToPlane * plane.normal;
+                    particles[i].contactSpring = new BContactSpring
+                    {
+                        ks = contactSpringKS,
+                        kd = contactSpringKD,
+                        restLength = 0f, // We want the particle to be at the plane surface
+                        attachPoint = nearestPoint
+                    };
+                    particles[i].attachedToContact = true;
+                }
+                
+                // Apply penalty force: -k_s((x_p - x_g) · n)n - k_d * v_p
+                Vector3 penetrationVector = particles[i].position - particles[i].contactSpring.attachPoint;
+                float penetrationDepth = Vector3.Dot(penetrationVector, plane.normal);
+                
+                Vector3 springForce = -particles[i].contactSpring.ks * penetrationDepth * plane.normal;
+                Vector3 dampingForce = -particles[i].contactSpring.kd * particles[i].velocity;
+                
+                particles[i].currentForces += springForce + dampingForce;
+            }
+            else
+            {
+                // Particle is above the plane, no contact
+                particles[i].attachedToContact = false;
+            }
+        }
+    }
+
+    void SymplecticEulerIntegration(float deltaTime)
+    {
+        for (int i = 0; i < particles.Length; i++)
+        {
+            // a = F/m
+            Vector3 acceleration = particles[i].currentForces / particles[i].mass;
+            
+            // v = v + a * dt
+            particles[i].velocity += acceleration * deltaTime;
+            
+            // x = x + v * dt
+            particles[i].position += particles[i].velocity * deltaTime;
+        }
+    }
+
+    void FixedUpdate()
+    {
+        float deltaTime = Time.fixedDeltaTime;
+        
+        ResetParticleForces();
+        ApplyGravity();
+        ApplySpringForces();
+        HandleGroundCollisions();
+        SymplecticEulerIntegration(deltaTime);
+        UpdateMesh();
+        
+        // Debug rendering
+        if (debugRender)
+        {
+            int particleCount = particles.Length;
+            for (int i = 0; i < particleCount; i++)
+            {
+                // Draw force vectors in blue
+                Debug.DrawLine(particles[i].position, particles[i].position + particles[i].currentForces * 0.1f, Color.blue);
+
+                // Draw springs in red
+                int springCount = particles[i].attachedSprings.Count;
+                for (int j = 0; j < springCount; j++)
+                {
+                    Debug.DrawLine(particles[i].position, particles[particles[i].attachedSprings[j].attachedParticle].position, Color.red);
+                }
+                
+                // Draw contact springs in green if active
+                if (particles[i].attachedToContact)
+                {
+                    Debug.DrawLine(particles[i].position, particles[i].contactSpring.attachPoint, Color.green);
+                }
+            }
+            
+            // Also draw the ground plane normal for reference
+            Debug.DrawLine(plane.position, plane.position + plane.normal * 2f, Color.yellow);
         }
     }
 
@@ -191,124 +288,8 @@ public class BParticleSimMesh : MonoBehaviour
         InitPlane();
     }
 
-    /// <summary>
-    /// Draw a frame with some helper debug render code
-    /// </summary>
-    public void Update()
+    void Update()
     {
-         if (particles == null) return;
-
-        float dt = Time.fixedDeltaTime;
-
-        ResetParticleForces();
-
-        if (useGravity)
-        {
-            for (int i = 0; i < particles.Length; i++)
-            {
-                particles[i].currentForces += gravity * particles[i].mass;
-            }
-        }
-
-        for (int i = 0; i < particles.Length; i++)
-    {
-        foreach (BSpring s in particles[i].attachedSprings)
-        {
-            int j = s.attachedParticle;
-
-            Vector3 xi = particles[i].position;
-            Vector3 xj = particles[j].position;
-            Vector3 vi = particles[i].velocity;
-            Vector3 vj = particles[j].velocity;
-
-            Vector3 dir = xj - xi;
-            float dist = dir.magnitude;
-            if (dist == 0) continue;
-            Vector3 n = dir / dist;
-
-            // Hooke spring force
-            float fSpring = s.ks * (dist - s.restLength);
-
-            // Damping force
-            float fDamp = s.kd * Vector3.Dot((vi - vj), n);
-
-            Vector3 F = (fSpring + fDamp) * n;
-
-            // Apply equal-opposite forces
-            particles[i].currentForces += F;
-            particles[j].currentForces -= F;
-        }
-    }
-
-    // 4. Ground-plane collision springs
-    if (handlePlaneCollisions)
-    {
-        for (int i = 0; i < particles.Length; i++)
-        {
-            Vector3 p = particles[i].position;
-            Vector3 v = particles[i].velocity;
-
-            float d = Vector3.Dot(p - plane.position, plane.normal);
-
-            if (d < 0.0f)   // penetrating
-            {
-                // If newly attached, store contact point
-                if (!particles[i].attachedToContact)
-                {
-                    BContactSpring cs = new BContactSpring();
-                    cs.ks = contactSpringKS;
-                    cs.kd = contactSpringKD;
-                    cs.attachPoint = p - d * plane.normal;    // nearest plane point
-                    particles[i].contactSpring = cs;
-                    particles[i].attachedToContact = true;
-                }
-
-                // Apply penalty spring
-                BContactSpring s = particles[i].contactSpring;
-
-                Vector3 xg = s.attachPoint;
-                Vector3 n = plane.normal;
-
-                float penetration = Vector3.Dot((p - xg), n);
-
-                Vector3 F =
-                    -s.ks * penetration * n
-                    -s.kd * v;
-
-                particles[i].currentForces += F;
-            }
-            else
-            {
-                particles[i].attachedToContact = false;
-            }
-        }
-    }
-
-    // 5. Integrate motion (semi-implicit Euler)
-    for (int i = 0; i < particles.Length; i++)
-    {
-        Vector3 a = particles[i].currentForces / particles[i].mass;
-        particles[i].velocity += a * dt;
-        particles[i].position += particles[i].velocity * dt;
-    }
-
-    // 6. Update mesh
-    UpdateMesh();
-        /* This will work if you have a correctly made particles array
-        if (debugRender)
-        {
-            int particleCount = particles.Length;
-            for (int i = 0; i < particleCount; i++)
-            {
-                Debug.DrawLine(particles[i].position, particles[i].position + particles[i].currentForces, Color.blue);
-
-                int springCount = particles[i].attachedSprings.Count;
-                for (int j = 0; j < springCount; j++)
-                {
-                    Debug.DrawLine(particles[i].position, particles[particles[i].attachedSprings[j].attachedParticle].position, Color.red);
-                }
-            }
-        }
-        */
+        // Empty - all physics in FixedUpdate
     }
 }

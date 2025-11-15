@@ -507,6 +507,10 @@ PrefabInstance:
       value: -52.811
       objectReference: {fileID: 0}
     - target: {fileID: 7615318666792419822, guid: 6ec2ba81dba01a84884331a6d6e1a08c, type: 3}
+      propertyPath: useGravity
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 7615318666792419822, guid: 6ec2ba81dba01a84884331a6d6e1a08c, type: 3}
       propertyPath: debugRender
       value: 1
       objectReference: {fileID: 0}
