@@ -7,53 +7,92 @@ public class BParticleSimMesh : MonoBehaviour
 {
     public struct BSpring
     {
-        public float kd;
-        public float ks;
-        public float restLength;
-        public int attachedParticle;
+        public float kd;                        // damping coefficient
+        public float ks;                        // spring coefficient
+        public float restLength;                // rest length of this spring
+        public int attachedParticle;            // index of the attached other particle (use me wisely to avoid doubling springs and sprign calculations)
     }
 
     public struct BContactSpring
     {
-        public float kd;
-        public float ks;
-        public float restLength;
-        public Vector3 attachPoint;
+        public float kd;                        // damping coefficient
+        public float ks;                        // spring coefficient
+        public float restLength;                // rest length of this spring (think about this ... may not even be needed o_0
+        public Vector3 attachPoint;             // the attached point on the contact surface
     }
 
     public struct BParticle
     {
-        public Vector3 position;
-        public Vector3 velocity;
-        public float mass;
-        public BContactSpring contactSpring;
-        public bool attachedToContact;
-        public List<BSpring> attachedSprings;
-        public Vector3 currentForces;
+        public Vector3 position;                // position information
+        public Vector3 velocity;                // velocity information
+        public float mass;                      // mass information
+        public BContactSpring contactSpring;    // Special spring for contact forces
+        public bool attachedToContact;          // is thi sparticle currently attached to a contact (ground plane contact)
+        public List<BSpring> attachedSprings;   // all attached springs, as a list in case we want to modify later fast
+        public Vector3 currentForces;           // accumulate forces here on each step        
     }
 
     public struct BPlane
     {
-        public Vector3 position;
-        public Vector3 normal;
+        public Vector3 position;                // plane position
+        public Vector3 normal;                  // plane normal
     }
 
-    public float contactSpringKS = 1000.0f;
-    public float contactSpringKD = 20.0f;
-    public float defaultSpringKS = 100.0f;
-    public float defaultSpringKD = 1.0f;
-    public bool debugRender = false;
+    public float contactSpringKS = 1000.0f;     // contact spring coefficient with default 1000
+    public float contactSpringKD = 20.0f;       // contact spring daming coefficient with default 20
 
+    public float defaultSpringKS = 100.0f;      // default spring coefficient with default 100
+    public float defaultSpringKD = 1.0f;        // default spring daming coefficient with default 1
+
+    public bool debugRender = false;            // To render or not to render
+
+     /*** 
+     * I've given you all of the above to get you started
+     * Here you need to publicly provide the:
+     * - the ground plane transform (Transform)
+     * - handlePlaneCollisions flag (bool)
+     * - particle mass (float)
+     * - useGravity flag (bool)
+     * - gravity value (Vector3)
+     * Here you need to privately provide the:
+     * - Mesh (Mesh)
+     * - array of particles (BParticle[])
+     * - the plane (BPlane)
+     ***/
     // Public inspector variables
     public bool handlePlaneCollisions = true;
     public float particleMass = 1.0f;
     public bool useGravity = true;
     public Vector3 gravity = new Vector3(0, -9.8f, 0);
 
+    
     private Mesh mesh;
     private BParticle[] particles;
     private BPlane plane;
     private GameObject groundPlaneObject; // Reference to the actual ground plane
+
+    /// <summary>
+    /// Init everything
+    /// HINT: in particular you should probbaly handle the mesh, init all the particles, and the ground plane
+    /// HINT 2: I'd for organization sake put the init particles and plane stuff in respective functions
+    /// HINT 3: Note that mesh vertices when accessed from the mesh filter are in local coordinates.
+    ///         This script will be on the object with the mesh filter, so you can use the functions
+    ///         transform.TransformPoint and transform.InverseTransformPoint accordingly 
+    ///         (you need to operate on world coordinates, and render in local)
+    /// HINT 4: the idea here is to make a mathematical particle object for each vertex in the mesh, then connect
+    ///         each particle to every other particle. Be careful not to double your springs! There is a simple
+    ///         inner loop approach you can do such that you attached exactly one spring to each particle pair
+    ///         on initialization. Then when updating you need to remember a particular trick about the spring forces
+    ///         generated between particles. 
+    /// </summary>
+ 
+    /*** BIG HINT: My solution code has as least the following functions
+     * InitParticles()
+     * InitPlane()
+     * UpdateMesh() (remember the hint above regarding global and local coords)
+     * ResetParticleForces()
+     * ...
+     ***/
 
     void InitParticles()
     {
@@ -63,7 +102,7 @@ public class BParticleSimMesh : MonoBehaviour
         
         particles = new BParticle[vertices.Length];
         
-        // Initialize particles from mesh vertices
+        //initialize particles from mesh vertices
         for (int i = 0; i < vertices.Length; i++)
         {
             particles[i] = new BParticle
@@ -78,7 +117,7 @@ public class BParticleSimMesh : MonoBehaviour
             };
         }
         
-        // Create springs between all particle pairs (no duplicates)
+        //create springs
         for (int i = 0; i < particles.Length; i++)
         {
             for (int j = i + 1; j < particles.Length; j++)
@@ -100,24 +139,12 @@ public class BParticleSimMesh : MonoBehaviour
 
     void InitPlane()
     {
-        // Find the ground plane GameObject in the scene
-        groundPlaneObject = GameObject.Find("GroundPlane"); // Adjust name if different
-        
-        if (groundPlaneObject != null)
-        {
-            plane.position = groundPlaneObject.transform.position;
-            plane.normal = groundPlaneObject.transform.up; // Assuming the plane's up direction is the normal
-            
-            Debug.Log($"Ground plane found at position: {plane.position} with normal: {plane.normal}");
-        }
-        else
-        {
-            // Fallback: create a default ground plane at y=0
-            groundPlaneObject = new GameObject("DefaultGroundPlane");
-            plane.position = Vector3.zero;
-            plane.normal = Vector3.up;
-            Debug.LogWarning("No ground plane found in scene! Using default ground plane at y=0");
-        }
+        //find ground plane
+        groundPlaneObject = GameObject.Find("GroundPlane"); 
+  
+        plane.position = groundPlaneObject.transform.position;
+        plane.normal = groundPlaneObject.transform.up; 
+
     }
 
     void UpdateMesh()
@@ -126,7 +153,7 @@ public class BParticleSimMesh : MonoBehaviour
         
         for (int i = 0; i < particles.Length; i++)
         {
-            // Convert world position back to local coordinates for the mesh
+            //convert world position to local coordinates for mesh
             vertices[i] = transform.InverseTransformPoint(particles[i].position);
         }
         
@@ -143,11 +170,12 @@ public class BParticleSimMesh : MonoBehaviour
         }
     }
 
+//everything after is for updating
     void ApplyGravity()
     {
-        if (!useGravity) return;
+        if (!useGravity) return; //ignore if gravity is not applied
         
-        for (int i = 0; i < particles.Length; i++)
+        for (int i = 0; i < particles.Length; i++) //else loop
         {
             particles[i].currentForces += gravity * particles[i].mass;
         }
@@ -163,7 +191,7 @@ public class BParticleSimMesh : MonoBehaviour
                 Vector3 deltaPos = particles[i].position - particles[j].position;
                 float distance = deltaPos.magnitude;
                 
-                if (distance > 0.0001f) // Avoid division by zero
+                if (distance > 0.01f)
                 {
                     Vector3 direction = deltaPos / distance;
                     Vector3 deltaVel = particles[i].velocity - particles[j].velocity;
@@ -191,27 +219,27 @@ public class BParticleSimMesh : MonoBehaviour
         
         for (int i = 0; i < particles.Length; i++)
         {
-            // Calculate signed distance to plane
+            //calc distance to plane
             Vector3 toParticle = particles[i].position - plane.position;
             float distanceToPlane = Vector3.Dot(toParticle, plane.normal);
             
-            if (distanceToPlane < 0) // Particle is below the plane (penetrating)
+            if (distanceToPlane < 0) //below plane 
             {
-                if (!particles[i].attachedToContact)
+                if (!particles[i].attachedToContact) //if new collision
                 {
-                    // Initialize contact spring - attach point is the nearest point on the plane
+                    //Init contact spring, attach point is the nearest point on the plane
                     Vector3 nearestPoint = particles[i].position - distanceToPlane * plane.normal;
                     particles[i].contactSpring = new BContactSpring
                     {
                         ks = contactSpringKS,
                         kd = contactSpringKD,
-                        restLength = 0f, // We want the particle to be at the plane surface
+                        restLength = 0f, //particle on plane surface
                         attachPoint = nearestPoint
                     };
                     particles[i].attachedToContact = true;
                 }
                 
-                // Apply penalty force: -k_s((x_p - x_g) · n)n - k_d * v_p
+                //penalty force: -k_s((x_p - x_g) · n)n - k_d * v_p
                 Vector3 penetrationVector = particles[i].position - particles[i].contactSpring.attachPoint;
                 float penetrationDepth = Vector3.Dot(penetrationVector, plane.normal);
                 
@@ -222,7 +250,7 @@ public class BParticleSimMesh : MonoBehaviour
             }
             else
             {
-                // Particle is above the plane, no contact
+                //Particle is above the plane, no contact
                 particles[i].attachedToContact = false;
             }
         }
@@ -242,8 +270,13 @@ public class BParticleSimMesh : MonoBehaviour
             particles[i].position += particles[i].velocity * deltaTime;
         }
     }
+    void Start()
+    {
+        InitParticles();
+        InitPlane();
+    }
 
-    void FixedUpdate()
+    void FixedUpdate() //update is too fast so using fixed update
     {
         float deltaTime = Time.fixedDeltaTime;
         
@@ -282,14 +315,4 @@ public class BParticleSimMesh : MonoBehaviour
         }
     }
 
-    void Start()
-    {
-        InitParticles();
-        InitPlane();
-    }
-
-    void Update()
-    {
-        // Empty - all physics in FixedUpdate
-    }
 }
